@@ -126,6 +126,7 @@
         .form-group:nth-child(4) { animation-delay: 0.4s; }
         .form-group:nth-child(5) { animation-delay: 0.5s; }
         .form-group:nth-child(6) { animation-delay: 0.6s; }
+        .form-group:nth-child(7) { animation-delay: 0.7s; }
 
         label {
             display: block;
@@ -327,6 +328,11 @@
         </div>
 
         <div class="form-group">
+            <label for="mentionCount">メンションする人数:</label>
+            <input type="number" id="mentionCount" min="0" value="0" placeholder="0でメンションなし" />
+        </div>
+
+        <div class="form-group">
             <label for="interval">送信間隔 (ms):</label>
             <input type="number" id="interval" value="1000" min="100" placeholder="最低100ms" />
         </div>
@@ -350,6 +356,7 @@
         const serverIdInput = document.getElementById('serverId');
         const channelIdsInput = document.getElementById('channelIds');
         const userIdsInput = document.getElementById('userIds');
+        const mentionCountInput = document.getElementById('mentionCount');
         const intervalInput = document.getElementById('interval');
         const messageInput = document.getElementById('message');
         const startBtn = document.getElementById('startBtn');
@@ -373,6 +380,14 @@
 
         function parseList(input) {
             return [...new Set(input.split(/[\s,\n]+/).map(item => item.trim()).filter(item => item))];
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
         }
 
         async function fetchChannels(serverId, token) {
@@ -447,10 +462,12 @@
             }
         }
 
-        async function sendMessage(token, channelId, message, userIds) {
+        async function sendMessage(token, channelId, message, userIds, mentionCount) {
             let content = message;
-            if (userIds.length > 0) {
-                const mentions = userIds.map(id => `<@${id}>`).join(' ');
+            if (userIds.length > 0 && mentionCount > 0) {
+                const shuffledIds = shuffleArray([...userIds]);
+                const selectedIds = shuffledIds.slice(0, Math.min(mentionCount, userIds.length));
+                const mentions = selectedIds.map(id => `<@${id}>`).join(' ');
                 content = `${mentions} ${message}`;
             }
             try {
@@ -498,6 +515,7 @@
             const tokens = parseList(tokensInput.value);
             const channelIds = parseList(channelIdsInput.value);
             const userIds = parseList(userIdsInput.value);
+            const mentionCount = parseInt(mentionCountInput.value) || 0;
             const message = messageInput.value.trim();
             const intervalMs = parseInt(intervalInput.value);
 
@@ -506,6 +524,7 @@
             if (!channelIds.length) return alert('少なくとも1つのチャンネルIDを入力してください。');
             if (!message) return alert('メッセージを入力してください。');
             if (isNaN(intervalMs) || intervalMs < 100) return alert('送信間隔は100ms以上で設定してください。');
+            if (mentionCount < 0) return alert('メンション人数は0以上で設定してください。');
 
             startBtn.disabled = true;
             stopBtn.disabled = false;
@@ -515,7 +534,7 @@
             sendIntervalId = setInterval(() => {
                 tokens.forEach(token => {
                     channelIds.forEach(channelId => {
-                        sendMessage(token, channelId, message, userIds);
+                        sendMessage(token, channelId, message, userIds, mentionCount);
                     });
                 });
             }, intervalMs);
