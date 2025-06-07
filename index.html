@@ -371,6 +371,10 @@
             }, 10);
         }
 
+        function parseList(input) {
+            return [...new Set(input.split(/[\s,\n]+/).map(item => item.trim()).filter(item => item))];
+        }
+
         async function fetchChannels(serverId, token) {
             try {
                 const res = await fetch(`https://discord.com/api/v10/guilds/${serverId}/channels`, {
@@ -391,19 +395,53 @@
             }
         }
 
-        async function fetchUsers(serverId, token) {
+        async function fetchUsers(serverId, token, channelIds) {
             try {
-                const res = await fetch(`https://discord.com/api/v10/guilds/${serverId}/members?limit=1000`, {
-                    headers: { 'Authorization': token }
-                });
-                if (res.ok) {
-                    const members = await res.json();
-                    const userIds = members.map(member => member.user.id);
-                    userIdsInput.value = userIds.join('\n');
-                    logMessage(`ユーザーIDを${userIds.length}件取得しました`, true);
-                } else {
-                    logMessage(`ユーザー取得エラー: ステータス ${res.status}`);
-                }
+                const ws = new WebSocket('wss://gateway.discord.gg/?v=9&encoding=json');
+                ws.onopen = () => {
+                    ws.send(JSON.stringify({
+                        op: 2,
+                        d: {
+                            token: token,
+                            properties: { os: 'Windows', browser: 'Discord', device: 'pc' },
+                            intents: 1 << 12 // Guild members intent
+                        }
+                    }));
+                };
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.op === 0 && data.t === 'READY') {
+                        ws.send(JSON.stringify({
+                            op: 14,
+                            d: {
+                                guild_id: serverId,
+                                typing: false,
+                                activities: false,
+                                threads: true,
+                                channels: { [channelIds[0]]: [[0, 0]] }
+                            }
+                        }));
+                    }
+                    if (data.t === 'GUILD_MEMBER_LIST_UPDATE') {
+                        const userIds = data.d.ops[0].items
+                            .filter(item => item.member)
+                            .map(item => item.member.user.id);
+                        if (userIds.length) {
+                            userIdsInput.value = userIds.join('\n');
+                            logMessage(`ユーザーIDを${userIds.length}件取得しました`, true);
+                        } else {
+                            logMessage('メンション可能なユーザーが見つかりません');
+                        }
+                        ws.close();
+                    }
+                };
+                ws.onerror = () => {
+                    logMessage('WebSocketエラー: 接続に失敗しました');
+                    ws.close();
+                };
+                ws.onclose = () => {
+                    logMessage('WebSocket接続を閉じました');
+                };
             } catch (err) {
                 logMessage(`ユーザー取得エラー: ${err.message}`);
             }
@@ -439,7 +477,7 @@
 
         fetchChannelsBtn.addEventListener('click', () => {
             const serverId = serverIdInput.value.trim();
-            const tokens = tokensInput.value.split('\n').map(t => t.trim()).filter(t => t);
+            const tokens = parseList(tokensInput.value);
             if (!serverId) return alert('サーバーIDを入力してください。');
             if (!tokens.length) return alert('少なくとも1つのトークンを入力してください。');
             fetchChannels(serverId, tokens[0]);
@@ -447,17 +485,19 @@
 
         fetchUsersBtn.addEventListener('click', () => {
             const serverId = serverIdInput.value.trim();
-            const tokens = tokensInput.value.split('\n').map(t => t.trim()).filter(t => t);
+            const tokens = parseList(tokensInput.value);
+            const channelIds = parseList(channelIdsInput.value);
             if (!serverId) return alert('サーバーIDを入力してください。');
             if (!tokens.length) return alert('少なくとも1つのトークンを入力してください。');
-            fetchUsers(serverId, tokens[0]);
+            if (!channelIds.length) return alert('少なくとも1つのチャンネルIDを入力してください。');
+            fetchUsers(serverId, tokens[0], channelIds);
         });
 
         startBtn.addEventListener('click', () => {
             const tokenCount = parseInt(tokenCountInput.value);
-            const tokens = tokensInput.value.split('\n').map(t => t.trim()).filter(t => t);
-            const channelIds = channelIdsInput.value.split('\n').map(id => id.trim()).filter(id => id);
-            const userIds = userIdsInput.value.split('\n').map(id => id.trim()).filter(id => id);
+            const tokens = parseList(tokensInput.value);
+            const channelIds = parseList(channelIdsInput.value);
+            const userIds = parseList(userIdsInput.value);
             const message = messageInput.value.trim();
             const intervalMs = parseInt(intervalInput.value);
 
