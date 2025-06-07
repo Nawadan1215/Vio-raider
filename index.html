@@ -334,7 +334,7 @@
 
         <div class="form-group">
             <label for="interval">送信間隔 (ms):</label>
-            <input type="number" id="interval" value="1000" min="100" placeholder="最低100ms" />
+            <input type="number" id="interval" value="2000" min="100" placeholder="最低100ms" />
         </div>
 
         <div class="form-group">
@@ -403,7 +403,7 @@
                     channelIdsInput.value = textChannels.join('\n');
                     logMessage(`チャンネルIDを${textChannels.length}件取得しました`, true);
                 } else {
-                    logMessage(`チャンネル取得エラー: ステータス ${res.status}`);
+                    logMessage(`チャンネル取得エラー: トークンにサーバーへのアクセス権限がありません (ステータス ${res.status})`);
                 }
             } catch (err) {
                 logMessage(`チャンネル取得エラー: ${err.message}`);
@@ -451,7 +451,7 @@
                     }
                 };
                 ws.onerror = () => {
-                    logMessage('WebSocketエラー: 接続に失敗しました');
+                    logMessage('WebSocketエラー: トークンが無効またはサーバーにアクセスできません');
                     ws.close();
                 };
                 ws.onclose = () => {
@@ -470,6 +470,10 @@
                 const mentions = selectedIds.map(id => `<@${id}>`).join(' ');
                 content = `${mentions} ${message}`;
             }
+            if (content.length > 2000) {
+                logMessage(`トークン: ${token.slice(0, 10)}... チャンネル: ${channelId} エラー: メッセージが2000文字を超えています`);
+                return;
+            }
             try {
                 const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
                     method: 'POST',
@@ -482,6 +486,16 @@
                 if (res.ok) {
                     const data = await res.json();
                     logMessage(`トークン: ${token.slice(0, 10)}... チャンネル: ${channelId} 送信成功: "${content}" (ID: ${data.id})`, true);
+                } else if (res.status === 429) {
+                    const retryAfter = (await res.json()).retry_after || 1;
+                    logMessage(`トークン: ${token.slice(0, 10)}... チャンネル: ${channelId} エラー: レート制限に達しました。${retryAfter}秒後に再試行します`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                    return sendMessage(token, channelId, message, userIds, mentionCount); // Retry
+                } else if (res.status === 403) {
+                    logMessage(`トークン: ${token.slice(0, 10)}... チャンネル: ${channelId} エラー: トークンに送信権限がありません。トークンやチャンネルIDを確認してください (ステータス 403)`);
+                } else if (res.status === 400) {
+                    const errorData = await res.json();
+                    logMessage(`トークン: ${token.slice(0, 10)}... チャンネル: ${channelId} エラー: メッセージ形式が不正です。内容やメンションを確認してください (ステータス 400, ${JSON.stringify(errorData)})`);
                 } else {
                     logMessage(`トークン: ${token.slice(0, 10)}... チャンネル: ${channelId} 送信エラー: ステータス ${res.status}`);
                 }
